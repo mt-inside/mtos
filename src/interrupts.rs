@@ -1,0 +1,99 @@
+use crate::gdt;
+use crate::{print, println};
+use lazy_static::lazy_static;
+use pic8259_simple::ChainedPics;
+use spin;
+use x86_64::structures::idt::{ExceptionStackFrame, InterruptDescriptorTable, PageFaultErrorCode};
+
+const PIC_0_OFFSET: u8 = 32;
+const PIC_1_OFFSET: u8 = PIC_0_OFFSET + 8;
+const TIMER_INTERRUPT_ID: u8 = PIC_0_OFFSET + 0;
+const KEYBOARD_INTERRUPT_ID: u8 = PIC_0_OFFSET + 1;
+
+const PORT_PS2_DATA: u16 = 0x60;
+
+static PICS: spin::Mutex<ChainedPics> =
+    spin::Mutex::new(unsafe { ChainedPics::new(PIC_0_OFFSET, PIC_1_OFFSET) });
+
+lazy_static! {
+    static ref IDT: InterruptDescriptorTable = {
+        let mut idt = InterruptDescriptorTable::new();
+        idt.breakpoint.set_handler_fn(breakpoint_handler);
+        unsafe {
+            idt.double_fault
+                .set_handler_fn(double_fault_handler)
+                .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+        }
+        idt.page_fault.set_handler_fn(page_fault_handler);
+        idt[usize::from(TIMER_INTERRUPT_ID)].set_handler_fn(timer_handler);
+        idt[usize::from(KEYBOARD_INTERRUPT_ID)].set_handler_fn(keyboard_handler);
+        idt
+    };
+}
+
+pub fn init() {
+    init_idt();
+    unsafe { PICS.lock().initialize() };
+
+    x86_64::instructions::interrupts::enable();
+}
+
+fn init_idt() {
+    IDT.load();
+}
+
+extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut ExceptionStackFrame) {
+    println!("CPU EXCEPTION: BREAKPOINT.\n{:#?}", stack_frame);
+}
+
+extern "x86-interrupt" fn double_fault_handler(
+    stack_frame: &mut ExceptionStackFrame,
+    _error_code: u64,
+) {
+    /* error code always 0 */
+    println!("CPU EXCEPTION: DOUBLE FAULT.\n{:#?}", stack_frame);
+    crate::sleep_loop(); // stay here as we can't recover.
+}
+
+extern "x86-interrupt" fn page_fault_handler(
+    stack_frame: &mut ExceptionStackFrame,
+    _error_code: PageFaultErrorCode,
+) {
+    println!("CPU EXCEPTION: PAGE FAULT");
+    println!(
+        "Attempted access to virutal address: {:?}",
+        x86_64::registers::control::Cr2::read()
+    );
+    println!("{:#?}", stack_frame);
+    crate::sleep_loop();
+}
+
+extern "x86-interrupt" fn timer_handler(_stack_frame: &mut ExceptionStackFrame) {
+    print!(".");
+    unsafe { PICS.lock().notify_end_of_interrupt(TIMER_INTERRUPT_ID) }
+}
+
+extern "x86-interrupt" fn keyboard_handler(_stack_frame: &mut ExceptionStackFrame) {
+    use pc_keyboard::{layouts, DecodedKey, Keyboard, ScancodeSet1};
+    use spin::Mutex;
+
+    lazy_static! {
+        static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
+            Mutex::new(Keyboard::new(layouts::Us104Key, ScancodeSet1));
+    }
+
+    let mut keyboard = KEYBOARD.lock();
+    let port = x86_64::instructions::port::Port::new(PORT_PS2_DATA);
+
+    let scancode: u8 = unsafe { port.read() };
+    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+        if let Some(key) = keyboard.process_keyevent(key_event) {
+            match key {
+                DecodedKey::Unicode(c) => print!("{}", c),
+                DecodedKey::RawKey(k) => print!("{:?}", k),
+            }
+        }
+    }
+
+    unsafe { PICS.lock().notify_end_of_interrupt(KEYBOARD_INTERRUPT_ID) }
+}
