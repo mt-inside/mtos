@@ -3,11 +3,13 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
 
+const VGA_BUFFER: u64 = 0xb8000;
+
 lazy_static! {
     pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
         col: 0,
         color: ColorCode::new(Color::LightGray, Color::Blue),
-        buf: unsafe { &mut *(0xb8000 as *mut Buffer) },
+        buf: unsafe { &mut *(VGA_BUFFER as *mut Buffer) },
     });
 }
 

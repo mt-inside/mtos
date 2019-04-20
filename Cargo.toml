@@ -12,6 +12,7 @@ uart_16550 = "^0.1"
 x86_64 = "^0.5"
 pic8259_simple = "^0.1"
 pc-keyboard = "^0.3"
+ux = {default-features = false, version = "^0.1"}
 
 [dependencies.lazy_static]
 version = "^1.0"
