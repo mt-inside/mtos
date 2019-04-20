@@ -44,7 +44,7 @@ fn panic(info: &PanicInfo) -> ! {
     loop {}
 }
 
-use x86_64::structures::idt::{ExceptionStackFrame, InterruptDescriptorTable};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 lazy_static! {
     static ref TEST_IDT: InterruptDescriptorTable = {
@@ -64,7 +64,7 @@ pub fn init_test_idt() {
 }
 
 extern "x86-interrupt" fn double_fault_handler(
-    _stack_frame: &mut ExceptionStackFrame,
+    _stack_frame: &mut InterruptStackFrame,
     _error_code: u64,
 ) {
     serial_println!("ok");

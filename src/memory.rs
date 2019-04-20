@@ -1,4 +1,4 @@
-use crate::{print, println};
+use crate::println;
 
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
 use x86_64::structures::paging::{
@@ -22,8 +22,6 @@ pub fn active_l4_table(phys_mem_offset: u64) -> &'static mut PageTable {
 }
 
 pub fn dump_page_tables() -> () {
-    use x86_64::structures::paging::PageTable;
-
     let (l4_table, _) = x86_64::registers::control::Cr3::read();
     /* gives a phy addr, which we can't directly access */
     println!("L4 page table at: {:?}", l4_table.start_address());
