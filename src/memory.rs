@@ -154,14 +154,14 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: u64) -> Option<P
     Some(frame.start_address() + u64::from(addr.page_offset()))
 }
 
-pub fn create_example_mapping(
+pub fn create_mapping(
     page: Page,
+    frame: PhysFrame,
     mapper: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
     use x86_64::structures::paging::PageTableFlags as Flags;
 
-    let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
     let fs = Flags::PRESENT | Flags::WRITABLE;
 
     let res = unsafe { mapper.map_to(page, frame, fs, frame_allocator) };

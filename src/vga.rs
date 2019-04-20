@@ -3,7 +3,10 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
 
-const VGA_BUFFER: u64 = 0xb8000;
+// The VGA buffer is memory-mapped to physical 0xb8000.
+// The bootloader creates an identity map at virtual 0xb8000.
+// We also map it to 0x1000, and use that here just to prove we can.
+const VGA_BUFFER: u64 = 0x1000;
 
 lazy_static! {
     pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
