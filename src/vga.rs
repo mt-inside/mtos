@@ -95,7 +95,7 @@ impl Writer {
         for b in s.bytes() {
             match b {
                 // 3 dots is inclusive range
-                0x20...0x7e | b'\n' => self.write_byte(b),
+                0x20..=0x7e | b'\n' => self.write_byte(b),
                 _ => self.write_byte(0xfe),
             }
         }
