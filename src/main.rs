@@ -29,8 +29,8 @@ pub fn kernel_main(boot_info: &'static BootInfo) -> ! {
         &mut frame_allocator,
     );
 
-    println!("Welcome to mTOS.");
-    serial_println!("Hello Host!");
+    serial_banner();
+    console_banner();
 
     let x = Box::new(42);
     println!("value on the heap: {} at {:p}", x, x);
@@ -56,4 +56,12 @@ pub fn kernel_main(boot_info: &'static BootInfo) -> ! {
 fn panic(info: &PanicInfo) -> ! {
     println!("{}", info);
     mtos::sleep_loop();
+}
+
+fn serial_banner() {
+    serial_println!("mtOS");
+    serial_println!("Hello Host!");
+}
+fn console_banner() {
+    println!("mtOS");
 }
