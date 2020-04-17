@@ -17,7 +17,7 @@ entry_point!(kernel_main);
 pub fn kernel_main(boot_info: &'static BootInfo) -> ! {
     gdt::init();
     interrupts::init();
-    let mut mapper = unsafe { memory::init(boot_info.physical_memory_offset) };
+    let mut mapper = unsafe { memory::init(VirtAddr::new(boot_info.physical_memory_offset)) };
     let mut frame_allocator = memory::BootInfoFrameAllocator_new(&boot_info.memory_map);
     allocator::init(&mut mapper, &mut frame_allocator).expect("Heap initialisation failed");
 

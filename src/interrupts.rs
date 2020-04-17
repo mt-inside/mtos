@@ -49,10 +49,10 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: &mut InterruptStackFra
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: &mut InterruptStackFrame,
     _error_code: u64,
-) {
+) -> ! {
     /* error code always 0 */
     println!("CPU EXCEPTION: DOUBLE FAULT.\n{:#?}", stack_frame);
-    crate::sleep_loop(); // stay here as we can't recover.
+    crate::sleep_loop(); // stay here as we can't recover (function returns bottom).
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -74,16 +74,16 @@ extern "x86-interrupt" fn timer_handler(_stack_frame: &mut InterruptStackFrame) 
 }
 
 extern "x86-interrupt" fn keyboard_handler(_stack_frame: &mut InterruptStackFrame) {
-    use pc_keyboard::{layouts, DecodedKey, Keyboard, ScancodeSet1};
+    use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
     use spin::Mutex;
 
     lazy_static! {
         static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-            Mutex::new(Keyboard::new(layouts::Us104Key, ScancodeSet1));
+            Mutex::new(Keyboard::new(layouts::Us104Key, ScancodeSet1, HandleControl::Ignore));
     }
 
     let mut keyboard = KEYBOARD.lock();
-    let port = x86_64::instructions::port::Port::new(PORT_PS2_DATA);
+    let mut port = x86_64::instructions::port::Port::new(PORT_PS2_DATA);
 
     let scancode: u8 = unsafe { port.read() };
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {

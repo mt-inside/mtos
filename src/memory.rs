@@ -2,21 +2,21 @@ use crate::println;
 
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
 use x86_64::structures::paging::{
-    FrameAllocator, MappedPageTable, Mapper, MapperAllSizes, Page, PageTable, PhysFrame, Size4KiB,
+    FrameAllocator, MappedPageTable, Mapper, MapperAllSizes, Page, PageTable, PageTableIndex, PhysFrame, UnusedPhysFrame, Size4KiB,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
 const X86_64_PAGE_TABLE_DEPTH: usize = 4;
-type PageTableOffsets = [ux::u9; X86_64_PAGE_TABLE_DEPTH];
+type PageTableOffsets = [PageTableIndex; X86_64_PAGE_TABLE_DEPTH];
 
-pub unsafe fn init(phys_mem_offset: u64) -> impl MapperAllSizes {
+pub unsafe fn init(phys_mem_offset: VirtAddr) -> impl MapperAllSizes {
     let l4_table = active_l4_table(phys_mem_offset);
     let c = move |f: PhysFrame| -> *mut PageTable { _frame_to_page_table(phys_mem_offset, f) };
 
     MappedPageTable::new(l4_table, c)
 }
 
-pub fn active_l4_table(phys_mem_offset: u64) -> &'static mut PageTable {
+pub fn active_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
     let (l4_table_phys, _) = x86_64::registers::control::Cr3::read();
     unsafe { _frame_to_page_table(phys_mem_offset, l4_table_phys) }
 }
@@ -34,13 +34,13 @@ pub fn dump_page_tables() -> () {
     }
 }
 
-unsafe fn _frame_to_page_table(phys_mem_offset: u64, frame: PhysFrame) -> &'static mut PageTable {
+unsafe fn _frame_to_page_table(phys_mem_offset: VirtAddr, frame: PhysFrame) -> &'static mut PageTable {
     let virt = phys_mem_offset + frame.start_address().as_u64();
-    let ptr = VirtAddr::new(virt).as_mut_ptr();
-    &mut *ptr
+    let ptr = virt.as_mut_ptr();
+    &mut *ptr // unsafe
 }
 
-pub fn dump_page_tables_2(phys_mem_offset: u64, stop: usize) -> () {
+pub fn dump_page_tables_2(phys_mem_offset: VirtAddr, stop: usize) -> () {
     if stop < 1 || stop > X86_64_PAGE_TABLE_DEPTH {
         return;
     }
@@ -55,7 +55,7 @@ pub fn dump_page_tables_2(phys_mem_offset: u64, stop: usize) -> () {
     );
 }
 
-fn _dump_table(phys_mem_offset: u64, phys: PhysFrame, stop: usize, level: usize) -> () {
+fn _dump_table(phys_mem_offset: VirtAddr, phys: PhysFrame, stop: usize, level: usize) -> () {
     let table = unsafe { _frame_to_page_table(phys_mem_offset, phys) };
 
     for (i, entry) in table.iter().enumerate() {
@@ -69,13 +69,13 @@ fn _dump_table(phys_mem_offset: u64, phys: PhysFrame, stop: usize, level: usize)
     }
 }
 
-pub unsafe fn translate_addr_mt(physical_memory_offset: u64, addr: VirtAddr) -> Option<PhysAddr> {
+pub unsafe fn translate_addr_mt(physical_memory_offset: VirtAddr, addr: VirtAddr) -> Option<PhysAddr> {
     _translate_addr(physical_memory_offset, addr)
 }
 
-fn _translate_addr(phys_mem_offset: u64, addr: VirtAddr) -> Option<PhysAddr> {
+fn _translate_addr(phys_mem_offset: VirtAddr, addr: VirtAddr) -> Option<PhysAddr> {
     let (l4_table_phys, _) = x86_64::registers::control::Cr3::read();
-    let table_indices: PageTableOffsets = [
+    let table_indices = [
         addr.p1_index(),
         addr.p2_index(),
         addr.p3_index(),
@@ -91,7 +91,7 @@ fn _translate_addr(phys_mem_offset: u64, addr: VirtAddr) -> Option<PhysAddr> {
     frame_base.map(|b| b + u64::from(addr.page_offset()))
 }
 fn _traverse_table(
-    phys_mem_offset: u64,
+    phys_mem_offset: VirtAddr,
     table_phys: PhysFrame,
     table_indices: PageTableOffsets,
     level: usize,
@@ -116,10 +116,10 @@ fn _traverse_table(
     }
 }
 
-pub unsafe fn translate_addr_ref(addr: VirtAddr, physical_memory_offset: u64) -> Option<PhysAddr> {
+pub unsafe fn translate_addr_ref(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Option<PhysAddr> {
     translate_addr_inner(addr, physical_memory_offset)
 }
-fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: u64) -> Option<PhysAddr> {
+fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: VirtAddr) -> Option<PhysAddr> {
     use x86_64::registers::control::Cr3;
     use x86_64::structures::paging::page_table::FrameError;
 
@@ -137,8 +137,8 @@ fn translate_addr_inner(addr: VirtAddr, physical_memory_offset: u64) -> Option<P
     // traverse the multi-level page table
     for &index in &table_indexes {
         // convert the frame into a page table reference
-        let virt = frame.start_address().as_u64() + physical_memory_offset;
-        let table_ptr: *const PageTable = VirtAddr::new(virt).as_ptr();
+        let virt = physical_memory_offset + frame.start_address().as_u64();
+        let table_ptr: *const PageTable = virt.as_ptr();
         let table = unsafe { &*table_ptr };
 
         // read the page table entry and update `frame`
@@ -163,38 +163,40 @@ pub fn create_mapping(
     use x86_64::structures::paging::PageTableFlags as Flags;
 
     let fs = Flags::PRESENT | Flags::WRITABLE;
+    let unused_frame = unsafe { UnusedPhysFrame::new(frame) };
 
-    let res = unsafe { mapper.map_to(page, frame, fs, frame_allocator) };
+    let res = mapper.map_to(page, unused_frame, fs, frame_allocator);
     res.expect("Failed to create new mapping").flush();
 }
 
 pub struct EmptyFrameAllocator;
-impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<UnusedPhysFrame> {
         None
     }
 }
 
 pub struct BootInfoFrameAllocator<I>
 where
-    I: Iterator<Item = PhysFrame>,
+    I: Iterator<Item = UnusedPhysFrame>,
 {
     frames: I,
 }
 
 impl<I> BootInfoFrameAllocator<I>
 where
-    I: Iterator<Item = PhysFrame>,
+    I: Iterator<Item = UnusedPhysFrame>,
 {
     pub fn new(
         memory_map: &'static MemoryMap,
-    ) -> BootInfoFrameAllocator<impl Iterator<Item = PhysFrame>> {
+    ) -> BootInfoFrameAllocator<impl Iterator<Item = UnusedPhysFrame>> {
         let frames = memory_map
             .iter()
             .filter(|r| r.region_type == MemoryRegionType::Usable)
             .map(|r| r.range.start_addr()..r.range.end_addr())
             .flat_map(|r| r.step_by(4096))
-            .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)));
+            .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
+            .map(|f| unsafe { UnusedPhysFrame::new(f) });
 
         BootInfoFrameAllocator { frames }
     }
@@ -202,22 +204,23 @@ where
 
 pub fn BootInfoFrameAllocator_new(
     memory_map: &'static MemoryMap,
-) -> BootInfoFrameAllocator<impl Iterator<Item = PhysFrame>> {
+) -> BootInfoFrameAllocator<impl Iterator<Item = UnusedPhysFrame>> {
     let frames = memory_map
         .iter()
         .filter(|r| r.region_type == MemoryRegionType::Usable)
         .map(|r| r.range.start_addr()..r.range.end_addr())
         .flat_map(|r| r.step_by(4096))
-        .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)));
+        .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
+        .map(|f| unsafe { UnusedPhysFrame::new(f) });
 
     BootInfoFrameAllocator { frames }
 }
 
-impl<I> FrameAllocator<Size4KiB> for BootInfoFrameAllocator<I>
+unsafe impl<I> FrameAllocator<Size4KiB> for BootInfoFrameAllocator<I>
 where
-    I: Iterator<Item = PhysFrame>,
+    I: Iterator<Item = UnusedPhysFrame>,
 {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+    fn allocate_frame(&mut self) -> Option<UnusedPhysFrame> {
         self.frames.next()
     }
 }
