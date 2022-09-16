@@ -12,7 +12,7 @@ x86_64 = "^0.9.6"
 uart_16550 = "^0.2.4"
 pic8259_simple = "^0.1.1"
 pc-keyboard = "^0.5.0"
-linked_list_allocator = "^0.8.0"
+linked_list_allocator = "^0.10.2"
 raw-cpuid = "^7.0.3"
 
 [dependencies.lazy_static]
